@@ -1,0 +1,4 @@
+{
+    "name": "buzzer-app",
+    "main": "party/server.ts"
+  }
