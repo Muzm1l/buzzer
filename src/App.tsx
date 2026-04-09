@@ -33,9 +33,7 @@ type ServerMessage =
   | { type: "buzz-ack"; order: BuzzEntry[] }
   | { type: "scores"; scores: Record<string, number>; teams: string[] };
 
-const PARTYKIT_HOST = import.meta.env.DEV
-  ? "127.0.0.1:1999"
-  : "buzzer-app.YOUR_USERNAME.partykit.dev";
+const PARTYKIT_HOST = import.meta.env.VITE_PARTYKIT_HOST ?? "127.0.0.1:1999";
 
 function randomRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
