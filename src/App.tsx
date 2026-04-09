@@ -82,11 +82,15 @@ function App() {
   const [myBuzzed, setMyBuzzed] = useState(false);
   const [myPlace, setMyPlace] = useState<number | null>(null);
   const [manualScoreInput, setManualScoreInput] = useState<Record<string, string>>({});
+  const [bulkScoreInput, setBulkScoreInput] = useState<Record<string, string>>({});
+  const [bulkApplySuccess, setBulkApplySuccess] = useState(false);
   const [scoreFlash, setScoreFlash] = useState<Record<string, ScoreFlash>>({});
+  const [myScoreFlash, setMyScoreFlash] = useState<ScoreFlash | null>(null);
 
   const [socket, setSocket] = useState<PartySocket | null>(null);
   const socketRef = useRef<PartySocket | null>(null);
   const prevScoresRef = useRef<Record<string, number>>({});
+  const prevMyScoreRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -242,6 +246,39 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [scores, teams]);
 
+  useEffect(() => {
+    const team = teamName.trim();
+    if (!team) return;
+    const currentScore = scores[team] ?? 0;
+    const prev = prevMyScoreRef.current;
+    prevMyScoreRef.current = currentScore;
+    if (prev === null || prev === currentScore) return;
+    setMyScoreFlash(currentScore > prev ? "up" : "down");
+    const timeout = window.setTimeout(() => setMyScoreFlash(null), 800);
+    return () => window.clearTimeout(timeout);
+  }, [scores, teamName]);
+
+  useEffect(() => {
+    if (teams.length === 0) return;
+    setBulkScoreInput((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const team of teams) {
+        if (next[team] === undefined) {
+          next[team] = String(scores[team] ?? 0);
+          changed = true;
+        }
+      }
+      for (const key of Object.keys(next)) {
+        if (!teams.includes(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [scores, teams]);
+
   const send = (payload: Record<string, unknown>) => {
     const s = socketRef.current;
     if (!s || s.readyState !== WebSocket.OPEN) return;
@@ -312,6 +349,7 @@ function App() {
     setHostCode("");
     setPendingHostCode("");
     setRoomCode("");
+    setBulkApplySuccess(false);
     resetRoundState();
   };
 
@@ -339,6 +377,16 @@ function App() {
     if (flash === "up") return "ring-2 ring-green-400";
     if (flash === "down") return "ring-2 ring-red-400";
     return "";
+  };
+
+  const applyBulkScores = () => {
+    for (const team of teams) {
+      const value = Number(bulkScoreInput[team] ?? scores[team] ?? 0);
+      if (!Number.isFinite(value)) continue;
+      sendHost({ type: "score-set", team, value });
+    }
+    setBulkApplySuccess(true);
+    window.setTimeout(() => setBulkApplySuccess(false), 1500);
   };
 
   const statusText =
@@ -587,6 +635,48 @@ function App() {
 
             {hostPanel === "scoreboard" && (
               <div className="space-y-3">
+                <div className="rounded-xl bg-slate-100 p-3">
+                  <h3 className="text-sm font-semibold text-slate-800">Bulk Assign Scores</h3>
+                  {sortedTeams.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">No teams available yet.</p>
+                  ) : (
+                    <div className="mt-2 space-y-0">
+                      {sortedTeams.map((team) => (
+                        <div
+                          key={`bulk-${team}`}
+                          className="flex items-center justify-between gap-4 border-b border-slate-200 py-2 last:border-b-0"
+                        >
+                          <label className="text-sm font-medium text-slate-700">{team}</label>
+                          <input
+                            type="number"
+                            value={bulkScoreInput[team] ?? String(scores[team] ?? 0)}
+                            onChange={(e) =>
+                              setBulkScoreInput((current) => ({
+                                ...current,
+                                [team]: e.target.value,
+                              }))
+                            }
+                            className="w-24 rounded-md border border-slate-300 px-2 py-1 text-right text-sm outline-none ring-blue-500 focus:ring-2"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={applyBulkScores}
+                    disabled={sortedTeams.length === 0}
+                    className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    Apply All
+                  </button>
+                  {bulkApplySuccess && (
+                    <p className="mt-2 text-xs font-medium text-green-600">Scores updated!</p>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-200" />
+
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-slate-700">Scoreboard</h2>
                   <button
@@ -654,6 +744,22 @@ function App() {
 
         {view === "buzzer" && (
           <section className="space-y-4 rounded-2xl bg-white p-5 shadow-sm">
+            <div
+              className={`mb-4 rounded-2xl border-2 border-blue-400 bg-blue-50 p-4 text-center ${
+                myScoreFlash === "up"
+                  ? "bg-green-100 border-green-400"
+                  : myScoreFlash === "down"
+                    ? "bg-red-100 border-red-400"
+                    : ""
+              }`}
+            >
+              <p className="text-sm font-medium text-blue-900">{teamName.trim() || "Team"}</p>
+              <p className="text-5xl font-bold text-blue-700">
+                {scores[teamName.trim()] ?? 0} {teamName.trim() && teamName.trim() === firstTeam ? "👑" : ""}
+              </p>
+              <p className="text-xs text-blue-800/70">your score</p>
+            </div>
+
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold">{teamName.trim()}</p>
