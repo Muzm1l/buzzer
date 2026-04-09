@@ -82,8 +82,13 @@ function App() {
   const [myBuzzed, setMyBuzzed] = useState(false);
   const [myPlace, setMyPlace] = useState<number | null>(null);
   const [manualScoreInput, setManualScoreInput] = useState<Record<string, string>>({});
-  const [bulkScoreInput, setBulkScoreInput] = useState<Record<string, string>>({});
-  const [bulkApplySuccess, setBulkApplySuccess] = useState(false);
+  const [bulkDeltaInput, setBulkDeltaInput] = useState("");
+  const [bulkApplySuccess, setBulkApplySuccess] = useState("");
+  const [bulkApplyError, setBulkApplyError] = useState("");
+  const [singleTeamTarget, setSingleTeamTarget] = useState("");
+  const [singleDeltaInput, setSingleDeltaInput] = useState("");
+  const [singleApplySuccess, setSingleApplySuccess] = useState("");
+  const [singleApplyError, setSingleApplyError] = useState("");
   const [scoreFlash, setScoreFlash] = useState<Record<string, ScoreFlash>>({});
   const [myScoreFlash, setMyScoreFlash] = useState<ScoreFlash | null>(null);
 
@@ -259,25 +264,14 @@ function App() {
   }, [scores, teamName]);
 
   useEffect(() => {
-    if (teams.length === 0) return;
-    setBulkScoreInput((current) => {
-      const next = { ...current };
-      let changed = false;
-      for (const team of teams) {
-        if (next[team] === undefined) {
-          next[team] = String(scores[team] ?? 0);
-          changed = true;
-        }
-      }
-      for (const key of Object.keys(next)) {
-        if (!teams.includes(key)) {
-          delete next[key];
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [scores, teams]);
+    if (teams.length === 0) {
+      setSingleTeamTarget("");
+      return;
+    }
+    if (!singleTeamTarget || !teams.includes(singleTeamTarget)) {
+      setSingleTeamTarget(teams[0]);
+    }
+  }, [singleTeamTarget, teams]);
 
   const send = (payload: Record<string, unknown>) => {
     const s = socketRef.current;
@@ -349,7 +343,10 @@ function App() {
     setHostCode("");
     setPendingHostCode("");
     setRoomCode("");
-    setBulkApplySuccess(false);
+    setBulkApplySuccess("");
+    setBulkApplyError("");
+    setSingleApplySuccess("");
+    setSingleApplyError("");
     resetRoundState();
   };
 
@@ -380,13 +377,37 @@ function App() {
   };
 
   const applyBulkScores = () => {
-    for (const team of teams) {
-      const value = Number(bulkScoreInput[team] ?? scores[team] ?? 0);
-      if (!Number.isFinite(value)) continue;
-      sendHost({ type: "score-set", team, value });
+    const raw = bulkDeltaInput.trim();
+    if (!/^-?\d+$/.test(raw) || Number(raw) === 0) {
+      setBulkApplyError("Enter a non-zero value");
+      setBulkApplySuccess("");
+      return;
     }
-    setBulkApplySuccess(true);
-    window.setTimeout(() => setBulkApplySuccess(false), 1500);
+    const delta = Number(raw);
+    for (const team of teams) {
+      sendHost({ type: "score-update", team, delta });
+    }
+    setBulkDeltaInput("");
+    setBulkApplyError("");
+    setBulkApplySuccess(`Added ${delta} pts to all teams!`);
+    window.setTimeout(() => setBulkApplySuccess(""), 1500);
+  };
+
+  const applySingleTeamDelta = () => {
+    const team = singleTeamTarget;
+    const raw = singleDeltaInput.trim();
+    if (!team) return;
+    if (!/^-?\d+$/.test(raw) || Number(raw) === 0) {
+      setSingleApplyError("Enter a non-zero value");
+      setSingleApplySuccess("");
+      return;
+    }
+    const delta = Number(raw);
+    sendHost({ type: "score-update", team, delta });
+    setSingleDeltaInput("");
+    setSingleApplyError("");
+    setSingleApplySuccess(`${team} ${delta > 0 ? "+" : ""}${delta} pts`);
+    window.setTimeout(() => setSingleApplySuccess(""), 1500);
   };
 
   const statusText =
@@ -635,44 +656,77 @@ function App() {
 
             {hostPanel === "scoreboard" && (
               <div className="space-y-3">
-                <div className="rounded-xl bg-slate-100 p-3">
-                  <h3 className="text-sm font-semibold text-slate-800">Bulk Assign Scores</h3>
-                  {sortedTeams.length === 0 ? (
-                    <p className="mt-2 text-sm text-slate-500">No teams available yet.</p>
-                  ) : (
-                    <div className="mt-2 space-y-0">
-                      {sortedTeams.map((team) => (
-                        <div
-                          key={`bulk-${team}`}
-                          className="flex items-center justify-between gap-4 border-b border-slate-200 py-2 last:border-b-0"
-                        >
-                          <label className="text-sm font-medium text-slate-700">{team}</label>
-                          <input
-                            type="number"
-                            value={bulkScoreInput[team] ?? String(scores[team] ?? 0)}
-                            onChange={(e) =>
-                              setBulkScoreInput((current) => ({
-                                ...current,
-                                [team]: e.target.value,
-                              }))
-                            }
-                            className="w-24 rounded-md border border-slate-300 px-2 py-1 text-right text-sm outline-none ring-blue-500 focus:ring-2"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={applyBulkScores}
-                    disabled={sortedTeams.length === 0}
-                    className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    Apply All
-                  </button>
+                <div className="rounded-xl bg-gray-50 p-4 mb-4">
+                  <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">
+                    Points to add to all teams
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={bulkDeltaInput}
+                      onChange={(e) => {
+                        setBulkDeltaInput(e.target.value);
+                        if (bulkApplyError) setBulkApplyError("");
+                      }}
+                      placeholder="e.g. 10"
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={applyBulkScores}
+                      disabled={sortedTeams.length === 0}
+                      className="bg-blue-600 text-white rounded-lg px-4 py-2 font-medium disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      Add to All Teams
+                    </button>
+                  </div>
                   {bulkApplySuccess && (
-                    <p className="mt-2 text-xs font-medium text-green-600">Scores updated!</p>
+                    <p className="text-green-600 text-sm mt-2">{bulkApplySuccess}</p>
                   )}
+                  {bulkApplyError && <p className="text-red-500 text-sm mt-2">{bulkApplyError}</p>}
+                </div>
+
+                <div className="rounded-xl bg-gray-50 p-4 mb-4">
+                  <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">
+                    Add points to one team
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={singleTeamTarget}
+                      onChange={(e) => setSingleTeamTarget(e.target.value)}
+                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    >
+                      {teams.map((team) => (
+                        <option key={`pick-${team}`} value={team}>
+                          {team}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={singleDeltaInput}
+                      onChange={(e) => {
+                        setSingleDeltaInput(e.target.value);
+                        if (singleApplyError) setSingleApplyError("");
+                      }}
+                      placeholder="e.g. 10"
+                      className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-right text-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={applySingleTeamDelta}
+                      disabled={teams.length === 0}
+                      className="bg-blue-600 text-white rounded-lg px-4 py-2 font-medium disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {singleApplySuccess && (
+                    <p className="text-green-600 text-sm mt-2">{singleApplySuccess}</p>
+                  )}
+                  {singleApplyError && <p className="text-red-500 text-sm mt-2">{singleApplyError}</p>}
                 </div>
 
                 <div className="border-t border-slate-200" />
@@ -726,7 +780,9 @@ function App() {
                             onClick={() => {
                               const value = Number(manualScoreInput[team] ?? "");
                               if (!Number.isFinite(value)) return;
-                              sendHost({ type: "score-set", team, value });
+                              const delta = value - (scores[team] ?? 0);
+                              if (delta === 0) return;
+                              sendHost({ type: "score-update", team, delta });
                             }}
                             className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
                           >
